@@ -89,6 +89,8 @@
       color: #666;
       transition: transform 0.3s;
       z-index: 100;
+      opacity: 0; /* 初始不可见 */
+      transition: opacity 0.3s;
     }
 
     /* 瀑布流容器 */
@@ -96,9 +98,10 @@
       position: relative;
       margin: 0 auto;
     }
-
     /* 卡片样式 */
     .card {
+      will-change: transform; /* 启用GPU加速 */
+      transition: none; /* 防止布局闪烁 */
       overflow: hidden;
       position: absolute;
       width: calc(50% - 5px); /* 默认两列 */
@@ -272,7 +275,6 @@
         this.container.appendChild(div);
         });
     }
-
       setupVideoEvents() {
         document.querySelectorAll('.video-cover').forEach(cover => {
           cover.addEventListener('click', (e) => {
@@ -344,7 +346,7 @@
         }, { passive: true });
 
         document.addEventListener('touchend', async () => {
-          if (currentY - startY > 80) {
+          if (window.scrollY <= 0 && currentY - startY > 80) {
             await this.refreshData();
           }
           indicator.style.transform = '';
