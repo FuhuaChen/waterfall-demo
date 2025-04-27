@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>图文视频混合瀑布流</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html {
+      touch-action: pan-y;
+      background: #f0f2f5;
+    }
+
+    .container {
+      position: relative;
+      padding: 10px;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    /* 视频卡片特殊样式 */
+    .video-card {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      padding-top: 56.25%; /* 16:9 比例 */
+    }
+
+    .video-wrapper {
+      position: absolute;
+      overflow: hidden;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .video-cover {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      cursor: pointer;
+    }
+
+    .play-button {
+      position: absolute;
+      top: 20%;
+      right: 5%;
+      transform: translate(-50%, -50%);
+      width: 20px;
+      height: 20px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 50%;
+      border: none;
+      pointer-events: none;
+    }
+
+    .play-button::before {
+      content: '';
+      position: absolute;
+      left: 65%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border: 5px solid transparent;
+      border-left: 7px solid white;
+    }
+
+    /* 下拉刷新样式 */
+    .refresh-indicator {
+      position: fixed;
+      top: -50px;
+      left: 0;
+      width: 100%;
+      height: 50px;
+      text-align: center;
+      line-height: 50px;
+      color: #666;
+      transition: transform 0.3s;
+      z-index: 100;
+    }
+
+    /* 瀑布流容器 */
+    .waterfall {
+      position: relative;
+      margin: 0 auto;
+    }
+
+    /* 卡片样式 */
+    .card {
+      overflow: hidden;
+      position: absolute;
+      width: calc(50% - 5px); /* 默认两列 */
+      background: white;
+      border-radius: 8px 8px 0 0;
+      /* border-radius: 8px; */
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transition: transform 0.3s;
+    }
+
+    .card img{
+      width: 100%;
+      height: auto;
+      /* border-radius: 8px 8px 0 0; */
+      display: block;
+      background: #eee;
+    }
+    
+    .card .text-wrapper {
+        padding: 10px;
+    }
+    .text-wrapper .txt {
+      font-size: 14px;
+      color: #333;
+      display: -webkit-box;
+      -webkit-line-clamp: 2; /* 限制行数 */
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .text-wrapper .sub{
+        font-size: 12px;
+        color: #9b9b9b;
+        margin-bottom: 2px;
+    }
+    .text-wrapper .user{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .user .avatar{
+        display: flex;
+        align-items: center;
+        font-size: 12px;
+        color: #9b9b9b;
+    }
+    .avatar img{
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 2px;
+    }
+    .user .like{
+        display: flex;
+        align-items: center;
+        font-size: 12px;
+        color: #9b9b9b;
+    }
+    .like img{
+        width: 20px;
+        height: 20px;
+        margin-right: 2px;
+    }
+
+    /* 加载提示 */
+    .loading-tip {
+      text-align: center;
+      padding: 15px;
+      color: #999;
+      display: none;
+    }
+
+    /* 大屏适配 */
+    @media (min-width: 768px) {
+      .card {
+        width: calc(33.33% - 7px); /* 三列布局 */
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="refresh-indicator">↓ 下拉刷新</div>
+  <div class="container">
+    <div class="waterfall"></div>
+    <div class="loading-tip">正在加载更多...</div>
+  </div>
+
+  <script>
+    class Waterfall {
+      constructor(container) {
+        this.container = container;
+        this.cols = 2;
+        this.gap = 10;
+        this.columnHeights = [];
+        this.initLayout();
+        this.setupEvents();
+        this.loadData(true);
+      }
+
+      initLayout() {
+        const containerWidth = this.container.offsetWidth;
+        this.cols = containerWidth > 768 ? 3 : 2;
+        this.columnHeights = new Array(this.cols).fill(0);
+        this.itemWidth = (containerWidth - (this.cols - 1) * this.gap) / this.cols;
+      }
+
+      addItems(items) {
+        items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'card ' + (item.type === 'video' ? 'video-card' : '');
+
+        // 统一设置卡片宽度
+        div.style.width = `${this.itemWidth}px`;
+
+        if (item.type === 'video') {
+            div.innerHTML = `
+            <div class="video-container">
+                <div class="video-wrapper">
+                <video class="lazy" data-src="${item.url}" playsinline webkit-playsinline></video>
+                <button class="play-button"></button>
+                </div>
+            </div>
+            <div class="text-wrapper">
+                <p class="txt">${item.desc}</p>
+                <div class="sub">${item.sub}</div>
+                <div class="user">
+                    <div class="avatar">
+                        <img src="${item.avatar}" >
+                        <span>${item.name}</span>
+                    </div>
+                    <div class="like">
+                        <img src="${item.likeImg}" >
+                        <span>${item.like}</span>
+                    </div>
+                </div>
+            </div>
+            `;
+            
+            // 视频卡片高度计算逻辑
+            const containerHeight = this.itemWidth * 0.5625; // 16:9比例计算
+            const textHeight = 100; // 文字区域预估高度
+            this.positionItem(div, containerHeight + textHeight);
+            
+        } else {
+            div.innerHTML = `
+            <img class="lazy" data-src="${item.url}" alt="${item.desc}">
+            <div class="text-wrapper">
+                <p class="txt">${item.desc}</p>
+                <div class="sub">${item.sub}</div>
+                <div class="user">
+                    <div class="avatar">
+                        <img src="${item.avatar}" >
+                        <span>${item.name}</span>
+                    </div>
+                    <div class="like">
+                        <img src="${item.likeImg}" >
+                        <span>${item.like}</span>
+                    </div>
+                </div>
+            </div>
+            `;
+
+            // 图片高度计算保持原有逻辑
+            const img = new Image();
+            img.onload = () => {
+                const height = img.naturalHeight * (this.itemWidth / img.naturalWidth) + 100;
+                this.positionItem(div, height);
+            }
+            img.src = item.url;
+        }
+
+        this.container.appendChild(div);
+        });
+    }
+
+      setupVideoEvents() {
+        document.querySelectorAll('.video-cover').forEach(cover => {
+          cover.addEventListener('click', (e) => {
+            const wrapper = e.target.closest('.video-wrapper');
+            const video = wrapper.querySelector('video');
+            const coverImg = wrapper.querySelector('.video-cover');
+
+            if (video.readyState < 3) { // 尚未加载元数据
+              video.src = video.dataset.src;
+              video.load();
+            }
+
+            video.style.display = 'block';
+            coverImg.style.display = 'none';
+            video.play().catch(() => {
+              // 处理自动播放被阻止的情况
+              video.controls = true;
+            });
+          });
+        });
+
+        // 处理视频暂停
+        document.querySelectorAll('video').forEach(video => {
+          video.addEventListener('click', () => {
+            video.paused ? video.play() : video.pause();
+          });
+        });
+      }
+
+      positionItem(el, height) {
+        const minHeight = Math.min(...this.columnHeights);
+        const columnIndex = this.columnHeights.indexOf(minHeight);
+        
+        const left = columnIndex * (this.itemWidth + this.gap);
+        const top = minHeight + this.gap;
+        
+        el.style.transform = `translate(${left}px, ${top}px)`;
+        el.style.height = `${height}px`; // 显式设置高度
+        
+        this.columnHeights[columnIndex] = top + height;
+        this.container.style.height = Math.max(...this.columnHeights) + 'px';
+    }
+
+
+      setupEvents() {
+        // 窗口变化监听
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(() => this.initLayout(), 200);
+        });
+
+        // 下拉刷新逻辑
+        let startY = 0;
+        let currentY = 0;
+        const indicator = document.querySelector('.refresh-indicator');
+        
+        document.addEventListener('touchstart', e => {
+          startY = e.touches[0].clientY;
+        }, { passive: true });
+
+        document.addEventListener('touchmove', e => {
+          currentY = e.touches[0].clientY;
+          if (window.scrollY <= 0 && currentY > startY) {
+            const delta = currentY - startY;
+            indicator.style.transform = `translateY(${delta}px)`;
+            indicator.textContent = delta > 80 ? '释放刷新' : '↓ 下拉刷新';
+          }
+        }, { passive: true });
+
+        document.addEventListener('touchend', async () => {
+          if (currentY - startY > 80) {
+            await this.refreshData();
+          }
+          indicator.style.transform = '';
+          indicator.textContent = '↓ 下拉刷新';
+        });
+
+        // 滚动加载
+        let loading = false;
+        window.addEventListener('scroll', () => {
+          if (loading) return;
+          const { scrollTop, clientHeight, scrollHeight } = document.documentElement;
+          if (scrollTop + clientHeight >= scrollHeight - 100) {
+            loading = true;
+            document.querySelector('.loading-tip').style.display = 'block';
+            setTimeout(() => {
+              this.loadData();
+              loading = false;
+              document.querySelector('.loading-tip').style.display = 'none';
+            }, 1000);
+          }
+        });
+      }
+
+      async loadData(initial = false) {
+        let type = getUrlParam(window.location.href, 'type')
+        // 模拟混合数据
+        const mockData = Array.from({length: 10}, (_, i) => {
+          let num
+          let num2 = getRandomInt(1,4)
+          if(type === '1'){
+            num = getRandomInt(1,4)
+          }else if(type === '2'){
+            num = getRandomInt(4,7)
+          }else{
+            num = getRandomInt(1,7)
+          }
+          const isVideo = num === 3;
+          
+          return isVideo ? {
+            type: 'video',
+            url: './3.mp4',
+            // cover: 'https://picsum.photos/300/200?random='+Math.random(),
+            desc: `梅丽莎连招小技巧!用害再上一层楼决胜(插飓叼繅辆悪尸觎鞧儘咡赛圳${i+1}`,
+            sub: '三角洲行动',
+            avatar: `./a${num2}.jpg`,
+            name: '大橘无情',
+            likeImg: './zan.png',
+            like: getRandomInt(1,600)
+          } : {
+            type: 'image',
+            url: `${num}.jpg?random=${Math.random()}`,
+            desc: `【版本前瞻】手游新版本预告--重爪新模型，部分恐龙新恐龙岛(诅咒之岛)${i+1}`,
+            sub: '迷你世界',
+            avatar: `./a${num2}.jpg`,
+            name: '我是你的乖乖',
+            likeImg: './zan.png',
+            like: getRandomInt(1,600)
+          };
+        });
+        this.addItems(mockData);
+        this.lazyLoad();
+        this.setupVideoEvents(); // 初始化视频事件
+      }
+
+      async refreshData() {
+        this.container.innerHTML = '';
+        this.columnHeights = new Array(this.cols).fill(0);
+        await this.loadData(true);
+      }
+
+      lazyLoad() {
+        const observer = new IntersectionObserver(entries => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const img = entry.target;
+              img.src = img.dataset.src;
+              observer.unobserve(img);
+            }
+          });
+        });
+
+        document.querySelectorAll('.lazy').forEach(img => observer.observe(img));
+      }
+    }
+
+    // 初始化
+    const waterfall = new Waterfall(document.querySelector('.waterfall'));
+
+    function getRandomInt(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+    function getUrlParam(url, key) {
+        const reg = new RegExp('[?&]' + key + '=([^&#]*)', 'i');
+        const result = url.match(reg);
+        return result ? result[1] : null;
+    }
+  </script>
+</body>
+</html>
